@@ -20,45 +20,55 @@ function connectMQTT() {
   });
 
   mqttClient.on('message', (topic, message) => {
-    const parts = topic.split('/');
-    if (parts.length !== 4) return;
-    const deviceId = parts[1];
-    const type = parts[3];
-    let payload;
     try {
-      payload = JSON.parse(message.toString());
-    } catch (e) {
-      return;
-    }
+      const parts = topic.split('/');
+      if (parts.length !== 4) return;
+      const deviceId = parts[1];
+      const type = parts[3];
+      let payload;
+      try {
+        payload = JSON.parse(message.toString());
+      } catch (e) {
+        console.error('Invalid JSON:', message.toString());
+        return;
+      }
 
-    const db = getDb();
-    const timestamp = new Date().toISOString();
+      const db = getDb();
+      const timestamp = new Date().toISOString();
 
-    if (type === 'fill') {
-      // Convert boolean full to integer (0/1)
-      const fullInt = payload.full ? 1 : 0;
-      db.prepare('INSERT INTO telemetry_fill (device_id, fill, full, timestamp) VALUES (?, ?, ?, ?)')
-        .run(deviceId, payload.fill, fullInt, timestamp);
-    } 
-    else if (type === 'moisture') {
-      db.prepare('INSERT INTO telemetry_moisture (device_id, raw, type, timestamp) VALUES (?, ?, ?, ?)')
-        .run(deviceId, payload.raw, payload.type, timestamp);
-    } 
-    else if (type === 'counts') {
-      db.prepare('INSERT INTO telemetry_counts (device_id, wet, dry, total, timestamp) VALUES (?, ?, ?, ?, ?)')
-        .run(deviceId, payload.wet, payload.dry, payload.total, timestamp);
-    } 
-    else if (type === 'status') {
-      // Convert boolean auto and locked to integers
-      const autoInt = payload.auto ? 1 : 0;
-      const lockedInt = payload.locked ? 1 : 0;
-      db.prepare('INSERT INTO telemetry_status (device_id, lid, auto, locked, timestamp) VALUES (?, ?, ?, ?, ?)')
-        .run(deviceId, payload.lid, autoInt, lockedInt, timestamp);
+      if (type === 'fill') {
+        const fill = typeof payload.fill === 'number' ? payload.fill : 0;
+        const fullInt = payload.full === true ? 1 : 0;
+        db.prepare('INSERT INTO telemetry_fill (device_id, fill, full, timestamp) VALUES (?, ?, ?, ?)')
+          .run(deviceId, fill, fullInt, timestamp);
+      } 
+      else if (type === 'moisture') {
+        const raw = typeof payload.raw === 'number' ? payload.raw : 0;
+        const typeStr = (payload.type === 'wet' || payload.type === 'dry') ? payload.type : 'dry';
+        db.prepare('INSERT INTO telemetry_moisture (device_id, raw, type, timestamp) VALUES (?, ?, ?, ?)')
+          .run(deviceId, raw, typeStr, timestamp);
+      } 
+      else if (type === 'counts') {
+        const wet = typeof payload.wet === 'number' ? payload.wet : 0;
+        const dry = typeof payload.dry === 'number' ? payload.dry : 0;
+        const total = typeof payload.total === 'number' ? payload.total : 0;
+        db.prepare('INSERT INTO telemetry_counts (device_id, wet, dry, total, timestamp) VALUES (?, ?, ?, ?, ?)')
+          .run(deviceId, wet, dry, total, timestamp);
+      } 
+      else if (type === 'status') {
+        const lid = (payload.lid === 'open') ? 'open' : 'closed';
+        const autoInt = payload.auto === true ? 1 : 0;
+        const lockedInt = payload.locked === true ? 1 : 0;
+        db.prepare('INSERT INTO telemetry_status (device_id, lid, auto, locked, timestamp) VALUES (?, ?, ?, ?, ?)')
+          .run(deviceId, lid, autoInt, lockedInt, timestamp);
+      }
+    } catch (err) {
+      console.error('Error processing MQTT message:', err);
     }
   });
 
   mqttClient.on('error', (err) => {
-    console.error('MQTT error:', err);
+    console.error('MQTT error (non-fatal):', err);
   });
 }
 
@@ -68,7 +78,7 @@ function publishCommand(deviceId, command) {
   if (mqttClient && mqttClient.connected) {
     mqttClient.publish(topic, payload);
   } else {
-    console.warn('MQTT not connected');
+    console.warn('MQTT not connected, command not sent');
   }
 }
 
